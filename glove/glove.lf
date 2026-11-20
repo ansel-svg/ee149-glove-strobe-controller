@@ -1,0 +1,44 @@
+target C {
+  coordination: decentralized
+};
+
+preamble {=
+  #include <Arduino.h>
+  #include <Wire.h>
+  #include "imu.h"
+  #include "flex.h"
+  #include "radio.h"
+=}
+// sample sensors and send glove state every 20 ms (50 Hz)
+reactor StrobeGloveTransmitter {
+  timer sample_timer(0, 20 msec);
+
+  reaction(startup) {=
+    Serial.begin(115200);
+    delay(1000);
+    Serial.println("initializing glove transmitter!");
+    
+    // init I2C and sensors
+    Wire.begin(21, 22);
+    init_imu();
+    init_flex_sensors();
+    init_esp_now();
+    
+    Serial.println("initialization complete!");
+  =}
+
+  reaction(sample_timer) {=
+    // read imu orientation
+    float pitch = get_pitch();
+    float roll = get_roll();
+
+    // read flex sensors and hand state
+    uint16_t flex_val = get_flex_average();
+
+    // debug print to monitor
+    Serial.printf("P: %.1f° - R: %.1f° - Flex: %d\n", pitch, roll, flex_val);
+
+    // send packet over ESP-NOW (in glove/src/radio.c)
+    // send_glove_packet(pitch, roll, flex_val);
+  =}
+}
