@@ -30,6 +30,21 @@ static QueueHandle_t latest_slot = NULL;
 // Atomicity required for the fact that something could be either received OR rejected; can only ever be one or other.
 static _Atomic uint32_t received_count = 0;
 static _Atomic uint32_t rejected_count = 0;
+static _Atomic uint32_t gap_count = 0;
+
+// Last accepted seq. Only link_accept touches these, and it has one caller at a time
+// (the Wi-Fi task, or the test source in loop), so they need no locking.
+static bool have_last_seq = false;
+static uint32_t last_seq = 0;
+
+// Counts missing seq numbers. A seq at or below the last one is a glove restart, not a gap.
+static void count_seq(uint32_t seq) {
+  if (have_last_seq && seq > last_seq) {
+    atomic_fetch_add(&gap_count, seq - last_seq - 1);
+  }
+  last_seq = seq;
+  have_last_seq = true;
+}
 
 void link_accept(const uint8_t *raw_packet, int length) {
   GlovePacket glove_packet;
@@ -43,6 +58,7 @@ void link_accept(const uint8_t *raw_packet, int length) {
     return;
   }
   atomic_fetch_add(&received_count, 1);
+  count_seq(glove_packet.seq);
   if (latest_slot != NULL) {
     xQueueOverwrite(latest_slot, &glove_packet);
   }
@@ -83,8 +99,73 @@ bool packet_fetch(GlovePacket *glove_packet) {
   return xQueueReceive(latest_slot, glove_packet, 0) == pdTRUE;
 }
 
+static bool imu_failing = false;
+
+bool packet_take(GlovePacket *glove_packet) {
+  if (!packet_fetch(glove_packet)) return false;
+  if (glove_packet->flags & GLOVE_FLAG_IMU_FAILED) {
+    if (!imu_failing) printf("LOG IMU failed\n");
+    imu_failing = true;
+    return false;
+  }
+  imu_failing = false;
+  return true;
+}
+
 void link_stats_tick(link_stats *stats) {
   if (stats == NULL) return;
   stats->received = atomic_load(&received_count);
   stats->rejected = atomic_load(&rejected_count);
+  stats->gaps = atomic_load(&gap_count);
+}
+
+static uint32_t last_stats_ms = 0;
+
+void link_stats_log(uint32_t now_ms) {
+  if (now_ms - last_stats_ms < LINK_STATS_MS) return;
+  last_stats_ms = now_ms;
+  link_stats st;
+  link_stats_tick(&st);
+  if (st.received == 0 && st.rejected == 0) return;   // nothing heard yet: stay quiet
+  printf("LOG LINK stats rx=%lu drop=%lu gap=%lu\n",
+         (unsigned long)st.received, (unsigned long)st.rejected, (unsigned long)st.gaps);
+}
+
+// Link-loss fade. Moves toward 1 while packets arrive, and toward 0 once none has arrived
+// for LINK_TIMEOUT_MS, at one rate: FADE_MS to go from 0 to 1. Stays 0 until the first packet.
+static float fade_factor = 0.0f;
+static uint32_t last_fade_call_ms = 0;
+static uint32_t last_valid_ms = 0;
+static bool seen_packet = false;
+static bool link_up = false;
+
+float link_fade(uint32_t now_ms, bool got_packet) {
+  uint32_t elapsed_ms = now_ms - last_fade_call_ms;
+  last_fade_call_ms = now_ms;
+
+  if (got_packet) {
+    seen_packet = true;
+    last_valid_ms = now_ms;
+  }
+  if (!seen_packet) return 0.0f;
+
+  bool fresh = (now_ms - last_valid_ms) <= LINK_TIMEOUT_MS;
+  if (fresh && !link_up) {
+    link_up = true;
+    printf("LOG LINK ok\n");
+  }
+  if (!fresh && link_up) {
+    link_up = false;
+    printf("LOG LINK lost\n");
+  }
+
+  float step = (float)elapsed_ms / (float)FADE_MS;
+  if (fresh) {
+    fade_factor += step;
+  } else {
+    fade_factor -= step;
+  }
+  if (fade_factor < 0.0f) fade_factor = 0.0f;
+  if (fade_factor > 1.0f) fade_factor = 1.0f;
+  return fade_factor;
 }

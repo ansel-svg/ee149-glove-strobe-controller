@@ -40,8 +40,11 @@ typedef struct __attribute__((packed)) {
   uint8_t flags;  // bit 0: IMU read failed; other bits sent as 0
 } GlovePacket;
 
+// flags bits.
+#define GLOVE_FLAG_IMU_FAILED 0x01
+
 // Compile-time size check that works in both C and C++: fails to compile if the size changes.
-typedef char glove_packet_size_check[(sizeof(GlovePacket) == 27) ? 1 : -1];
+typedef char glove_packet_size_check[2 * (sizeof(GlovePacket) == 27) - 1];
 
 #ifdef __cplusplus
 }

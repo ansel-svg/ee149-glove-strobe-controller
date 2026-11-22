@@ -11,16 +11,17 @@
 #ifndef LIGHT_MAP_H
 #define LIGHT_MAP_H
 
+#include <stdbool.h>
 #include <stdint.h>
+#include "state.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Placeholder for ticket 02: open-hand brightness only, on DMX channel 1.
-// pitch -45..+45 maps to 0..165; all other channels are 0. Ticket 06 replaces it with the
-// full output table, which also takes "mode" and "fade_factor".
-void light_frame(float pitch, uint8_t *dmx_channels);
+// Writes one frame of DMX_CHANNELS values from the mode, hand values and fade factor, using
+// the output table and the fixture profile chosen in receiver_config.h. See light_map.c.
+void light_frame(Mode mode, const hand_values *hand_values, float fade_factor, uint8_t *dmx_channels);
 
 #ifdef __cplusplus
 }

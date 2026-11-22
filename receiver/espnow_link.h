@@ -23,6 +23,7 @@ extern "C" {
 typedef struct {
   uint32_t received;  // packets that passed the checks and went into the slot
   uint32_t rejected;  // packets dropped for wrong length, magic or version
+  uint32_t gaps;      // missing seq numbers (cumulative); a backward seq is a restart, not a gap
 } link_stats;
 
 // Creates the one-slot queue. Starts ESP-NOW only when radio is true (not in test mode).
@@ -35,8 +36,19 @@ void link_accept(const uint8_t *raw_packet, int length);
 // Takes the newest accepted packet, if one arrived since the last call.
 bool packet_fetch(GlovePacket *glove_packet);
 
+// Like packet_fetch, but drops a packet whose IMU-failed flag is set, printing
+// LOG IMU failed once per run of failed packets. The link fade then covers a failed IMU.
+bool packet_take(GlovePacket *glove_packet);
+
 // Copies the counters into link_stats.
 void link_stats_tick(link_stats *stats);
+
+// Prints LOG LINK stats rx=<n> drop=<n> gap=<n> every LINK_STATS_MS, once anything has arrived.
+void link_stats_log(uint32_t now_ms);
+
+// Returns the link-loss fade factor, 0.0 to 1.0. Call once per loop pass; got_packet is true
+// when packet_fetch returned a packet this pass. Prints LOG LINK lost / LOG LINK ok on change.
+float link_fade(uint32_t now_ms, bool got_packet);
 
 #ifdef __cplusplus
 }
