@@ -1,0 +1,16 @@
+/*
+	This will be the main Lingua Franca program (C target) that pipes DMX lines from
+	the receiver's serial port to OLA on the laptop. It contains four reactors:
+	SerialReader (opens the port, runs a reader thread, schedules physical actions),
+	Router (checks for well-formed DMX: lines, forwards to OLA, prints other lines),
+	Watchdog (timer every 100 ms, blacks out the light after 2 s of silence),
+	and OlaOut (popen to ola_streaming_client, writes frames, 512-zero blackout on
+	shutdown).
+
+	Input: serial lines from the receiver via usb_port.c
+
+	Output: DMX frames to OLA via ola_streaming_client -u 1,
+	512-zero blackout frame on silence or shutdown
+
+	Interfaces with: usb_port.h / usb_port.c, ola_streaming_client, ola_set_dmx
+*/
